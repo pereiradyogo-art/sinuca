@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Jogo de Sinuca - 8 Ball Pool Clone</title>
+  <style>
+    body {
+      background-color: #1a1a1a;
+      color: #fff;
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      margin: 0;
+    }
+    h1 {
+      margin-bottom: 10px;
+    }
+    canvas {
+      border: 12px solid #5c3a21;
+      border-radius: 8px;
+      box-shadow: 0 10px 20px rgba(0,0,0,0.5);
+      background-color: #0d5c2d;
+      cursor: crosshair;
+    }
+    .instructions {
+      margin-top: 15px;
+      color: #ccc;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Sinuca 8-Ball</h1>
+  <canvas id="poolCanvas" width="800" height="400"></canvas>
+  <div class="instructions">
+    <p><strong>Como Jogar:</strong> Mova o mouse para mirar na Bola Branca. Clique e segure para carregar a força. Solte para dar a tacada.</p>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('poolCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const FRICTION = 0.985;
+    const BALL_RADIUS = 10;
+
+    class Ball {
+      constructor(x, y, color, number = 0) {
+        this.x = x;
+        this.y = y;
+        this.vx = 0;
+        this.vy = 0;
+        this.color = color;
+        this.number = number;
+        this.pocketed = false;
+      }
+
+      draw() {
+        if (this.pocketed) return;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, BALL_RADIUS, 0, Math.PI * 2);
+        ctx.fillStyle = this.color;
+        ctx.fill();
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.closePath();
+
+        if (this.number > 0) {
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, BALL_RADIUS / 2, 0, Math.PI * 2);
+          ctx.fillStyle = '#fff';
+          ctx.fill();
+          ctx.closePath();
+
+          ctx.fillStyle = '#000';
+          ctx.font = '8px Arial';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(this.number, this.x, this.y);
+        }
+      }
+
+      update() {
+        if (this.pocketed) return;
+
+        this.x += this.vx;
+        this.y += this.vy;
+
+        this.vx *= FRICTION;
+        this.vy *= FRICTION;
+
+        if (Math.abs(this.vx) < 0.05) this.vx = 0;
+        if (Math.abs(this.vy) < 0.05) this.vy = 0;
+
+        // Colisão com as bordas da mesa
+        if (this.x - BALL_RADIUS < 0) {
+          this.x = BALL_RADIUS;
+          this.vx *= -1;
+        }
+        if (this.x + BALL_RADIUS > canvas.width) {
+          this.x = canvas.width - BALL_RADIUS;
+          this.vx *= -1;
+        }
+        if (this.y - BALL_RADIUS < 0) {
+          this.y = BALL_RADIUS;
+          this.vy *= -1;
+        }
+        if (this.y + BALL_RADIUS > canvas.height) {
+          this.y = canvas.height - BALL_RADIUS;
+          this.vy *= -1;
+        }
+      }
+    }
+
+    // Pçapas/Caçapas da mesa
+    const pockets = [
+      { x: 0, y: 0 },
+      { x: canvas.width / 2, y: 0 },
+      { x: canvas.width, y: 0 },
+      { x: 0, y: canvas.height },
+      { x: canvas.width / 2, y: canvas.height },
+      { x: canvas.width, y: canvas.height }
+    ];
+
+    let balls = [];
+    let cueBall;
+    let mousePos = { x: 0, y: 0 };
+    let isMouseDown = false;
+    let power = 0;
+    const maxPower = 20;
+
+    function initGame() {
+      balls = [];
+      
+      // Bola Branca
+      cueBall = new Ball(200, canvas.height / 2, '#ffffff', 0);
+      balls.push(cueBall);
+
+      // Criar triângulo de bolas
+      const colors = ['#f39c12', '#2980b9', '#e74c3c', '#8e44ad', '#d35400', '#27ae60', '#c0392b', '#2c3e50'];
+      let startX = 550;
+      let startY = canvas.height / 2;
+      let row = 0;
+      let count = 0;
+
+      for (let i = 0; i < 5; i++) {
+        for (let j = 0; j <= i; j++) {
+          count++;
+          let color = colors[(count - 1) % colors.length];
+          if (count === 5) color = '#000000'; // Bola 8 no centro
+          
+          let bx = startX + i * (BALL_RADIUS * 2 * 0.866);
+          let by = startY - (i * BALL_RADIUS) + (j * BALL_RADIUS * 2);
+          balls.push(new Ball(bx, by, color, count));
+        }
+      }
+    }
+
+    function checkPocket(ball) {
+      if (ball.pocketed) return;
+      for (let p of pockets) {
+        let dist = Math.hypot(ball.x - p.x, ball.y - p.y);
+        if (dist < 20) {
+          ball.pocketed = true;
+          ball.vx = 0;
+          ball.vy = 0;
+          if (ball === cueBall) {
+            setTimeout(() => {
+              cueBall.pocketed = false;
+              cueBall.x = 200;
+              cueBall.y = canvas.height / 2;
+            }, 1000);
+          }
+        }
+      }
+    }
+
+    function resolveCollisions() {
+      for (let i = 0; i < balls.length; i++) {
+        for (let j = i + 1; j < balls.length; j++) {
+          let b1 = balls[i];
+          let b2 = balls[j];
+
+          if (b1.pocketed || b2.pocketed) continue;
+
+          let dx = b2.x - b1.x;
+          let dy = b2.y - b1.y;
+          let distance = Math.hypot(dx, dy);
+
+          if (distance < BALL_RADIUS * 2) {
+            let overlap = (BALL_RADIUS * 2) - distance;
+            let nx = dx / distance;
+            let ny = dy / distance;
+
+            b1.x -= nx * overlap / 2;
+            b1.y -= ny * overlap / 2;
+            b2.x += nx * overlap / 2;
+            b2.y += ny * overlap / 2;
+
+            let kx = b1.vx - b2.vx;
+            let ky = b1.vy - b2.vy;
+            let p = 2 * (nx * kx + ny * ky) / 2;
+
+            b1.vx -= p * nx;
+            b1.vy -= p * ny;
+            b2.vx += p * nx;
+            b2.vy += p * ny;
+          }
+        }
+      }
+    }
+
+    function isMoving() {
+      return balls.some(b => !b.pocketed && (Math.abs(b.vx) > 0 || Math.abs(b.vy) > 0));
+    }
+
+    canvas.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      mousePos.x = e.clientX - rect.left;
+      mousePos.y = e.clientY - rect.top;
+    });
+
+    canvas.addEventListener('mousedown', () => {
+      if (!isMoving() && !cueBall.pocketed) {
+        isMouseDown = true;
+        power = 0;
+      }
+    });
+
+    canvas.addEventListener('mouseup', () => {
+      if (isMouseDown) {
+        isMouseDown = false;
+        let angle = Math.atan2(mousePos.y - cueBall.y, mousePos.x - cueBall.x);
+        cueBall.vx = Math.cos(angle) * power;
+        cueBall.vy = Math.sin(angle) * power;
+        power = 0;
+      }
+    });
+
+    function drawPockets() {
+      ctx.fillStyle = '#000';
+      for (let p of pockets) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 22, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.closePath();
+      }
+    }
+
+    function drawAimLine() {
+      if (isMoving() || cueBall.pocketed) return;
+
+      let angle = Math.atan2(mousePos.y - cueBall.y, mousePos.x - cueBall.x);
+
+      // Desenhar Linha de Pontaria
+      ctx.beginPath();
+      ctx.moveTo(cueBall.x, cueBall.y);
+      ctx.lineTo(cueBall.x + Math.cos(angle) * 150, cueBall.y + Math.sin(angle) * 150);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.setLineDash([5, 5]);
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.closePath();
+
+      // Indicador de Força da Tacada
+      if (isMouseDown) {
+        if (power < maxPower) power += 0.3;
+        ctx.fillStyle = 'red';
+        ctx.fillRect(cueBall.x - 20, cueBall.y - 25, (power / maxPower) * 40, 5);
+      }
+    }
+
+    function gameLoop() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      drawPockets();
+
+      balls.forEach(ball => {
+        ball.update();
+        checkPocket(ball);
+      });
+
+      resolveCollisions();
+
+      balls.forEach(ball => ball.draw());
+
+      drawAimLine();
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    initGame();
+    gameLoop();
+  </script>
+</body>
+</html>
